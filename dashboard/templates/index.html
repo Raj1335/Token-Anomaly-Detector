@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Token Anomaly Detector</title></head>
+<body>
+  <h1>Token Anomaly Detector</h1>
+  <p>Events: {{ counts.events }} | Alerts: {{ counts.alerts }} | Incidents: {{ counts.incidents }}</p>
+  <h2>Severity</h2>
+  <ul>{% for row in severities %}<li>{{ row.severity }}: {{ row.count }}</li>{% endfor %}</ul>
+  <h2>Evaluation</h2>
+  {% if report %}{% for campaign, passed in report.campaign_pass.items() %}
+    <p>{{ campaign }}: {{ "PASS" if passed else "FAIL" }}</p>
+  {% endfor %}{% else %}<p>Run evaluation first.</p>{% endif %}
+  <p><a href="/incidents">View incidents</a></p>
+</body>
+</html>

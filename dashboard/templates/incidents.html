@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Incidents</title></head>
+<body><h1>Incidents</h1><table>
+  <tr><th>ID</th><th>Token</th><th>Severity</th><th>Action</th><th>Alerts</th></tr>
+  {% for row in incidents %}<tr><td><a href="/incident/{{ row.incident_id }}">{{ row.incident_id }}</a></td>
+  <td><a href="/token/{{ row.token_id }}">{{ row.token_id }}</a></td><td>{{ row.severity }}</td>
+  <td>{{ row.action }}</td><td>{{ row.alert_count }}</td></tr>{% endfor %}
+</table></body></html>

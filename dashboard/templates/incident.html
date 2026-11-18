@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Incident {{ incident.incident_id }}</title></head>
+<body><h1>Incident {{ incident.incident_id }}</h1>
+  <p>Token: <a href="/token/{{ incident.token_id }}">{{ incident.token_id }}</a></p>
+  <p>Severity: {{ incident.severity }} | Action: {{ incident.action }}</p>
+  <h2>Alerts</h2>{% for alert in alerts %}
+  <p><strong>{{ alert.detector }}</strong> {{ alert.subtype }}: {{ alert.reason }}</p>{% endfor %}
+  <h2>Event timeline</h2><table><tr><th>ID</th><th>Time</th><th>IP</th><th>City</th><th>Object</th></tr>
+  {% for event in timeline %}<tr><td>{{ event.event_id }}</td><td>{{ event.ts }}</td><td>{{ event.source_ip }}</td>
+  <td>{{ event.geo_city }}</td><td>{{ event.object_type }}</td></tr>{% endfor %}</table>
+</body></html>

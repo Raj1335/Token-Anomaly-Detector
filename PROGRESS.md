@@ -1,0 +1,6 @@
+- 2026-11-18 Phase 0: scaffolded packages, models, UTC helpers, SQLite schema, venv, and initial tests.
+- 2026-11-18 Phase 1: implemented deterministic 14-day generator and seed validation.
+- 2026-11-18 Phase 2: implemented detectors and known-answer tests.
+- 2026-11-18 Phase 3: implemented pipeline, correlation, response, evaluation, and CLI.
+- 2026-11-18 Phase 4: implemented the read-only Flask dashboard.
+- 2026-11-18 Phase 5: completed specification and project documentation.

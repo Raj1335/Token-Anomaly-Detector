@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Token {{ token_id }}</title></head>
+<body><h1>Token {{ token_id }}</h1>
+  {% if status and status.revoked_at %}<p>Revoked at {{ status.revoked_at }}</p>{% endif %}
+  <h2>Alerts</h2>{% for alert in alerts %}<p>{{ alert.ts }} {{ alert.detector }}: {{ alert.reason }}</p>{% endfor %}
+  <h2>Last 200 events</h2><table><tr><th>ID</th><th>Time</th><th>Principal</th><th>IP</th><th>City</th><th>Object</th><th>Records</th></tr>
+  {% for event in events %}<tr><td>{{ event.event_id }}</td><td>{{ event.ts }}</td><td>{{ event.principal }}</td>
+  <td>{{ event.source_ip }}</td><td>{{ event.geo_city }}</td><td>{{ event.object_type }}</td><td>{{ event.records_returned }}</td></tr>{% endfor %}</table>
+</body></html>
