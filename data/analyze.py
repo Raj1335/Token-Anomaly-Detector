@@ -204,6 +204,7 @@ def analyze_input(
     input_path: str | Path,
     out_dir: str | Path,
     *,
+    source_filename: str | None = None,
     baseline_days: int | None = None,
     baseline_until: str | None = None,
     geo_table: str | Path | None = None,
@@ -244,6 +245,8 @@ def analyze_input(
         str(input_path), result.events, boundary, result.rows_read,
         result.skipped_rows, result.has_geo_data,
     )
+    if source_filename is not None:
+        metadata["source_filename"] = source_filename
     metadata.update({
         "input_baseline_days": str(baseline_days or ""),
         "input_baseline_until": baseline_until or "",
@@ -362,7 +365,7 @@ def analyze_input(
     }
     report = {
         "run_parameters": {
-            "input_file": Path(input_path).name,
+            "input_file": source_filename or Path(input_path).name,
             "baseline_mode": (
                 f"{baseline_days} days" if baseline_days is not None
                 else f"until {baseline_until}" if baseline_until

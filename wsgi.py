@@ -1,4 +1,4 @@
-"""Gunicorn entry point that ensures the synthetic demo dataset is available."""
+"""Gunicorn entry point for the synthetic dashboard and optional log uploads."""
 
 from pathlib import Path
 

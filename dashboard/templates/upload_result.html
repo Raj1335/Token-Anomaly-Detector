@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Analysis results | Token Anomaly Detector{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Analysis complete</p>
+    <h1>{{ source_filename }}</h1>
+    <p class="lede">Ground truth is not available for uploaded data; findings are detector results, not proof of compromise.</p>
+  </div>
+  <a class="button button-secondary" href="{{ url_for('upload_logs') }}">Analyze another file</a>
+</div>
+
+<section class="kpi-grid" aria-label="Analysis summary">
+  <article class="card kpi-card"><p class="kpi-label">Rows read</p><p class="kpi-value">{{ report.data_quality.rows_read|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Rows skipped</p><p class="kpi-value">{{ report.data_quality.skipped_rows|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Alerts</p><p class="kpi-value">{{ report.alert_counts.values()|sum|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Incidents</p><p class="kpi-value">{{ report.severity_counts.values()|sum|number }}</p></article>
+</section>
+
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Baseline</p><h2>Analysis window</h2></div></div>
+  <dl class="summary-facts">
+    <div><dt>Baseline events</dt><dd>{{ report.data_quality.baseline_events|number }}</dd></div>
+    <div><dt>Evaluation events</dt><dd>{{ report.data_quality.evaluation_events|number }}</dd></div>
+    <div><dt>Baseline starts</dt><dd>{{ report.data_quality.baseline_start }}</dd></div>
+    <div><dt>Evaluation starts</dt><dd>{{ report.data_quality.evaluation_start_inclusive }}</dd></div>
+  </dl>
+</section>
+
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Incidents</p><h2>By severity</h2></div></div>
+  <ul class="legend-list">
+    {% for severity in ("HIGH", "MEDIUM", "LOW") %}
+      <li><span class="severity-badge severity-{{ severity|lower }}">{{ severity }}</span>
+        <strong>{{ report.severity_counts.get(severity, 0)|number }}</strong></li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if report.warnings %}
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Data quality</p><h2>Warnings</h2></div></div>
+  <ul>{% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Files</p><h2>Analysis outputs</h2></div></div>
+  <ul class="upload-output-list">
+    <li><a href="{{ url_for('uploaded_output', upload_id=upload_id, filename='report.html') }}">Open standalone HTML report</a></li>
+    <li><a href="{{ url_for('uploaded_output', upload_id=upload_id, filename='alerts.csv') }}">Download alerts.csv</a></li>
+    <li><a href="{{ url_for('uploaded_output', upload_id=upload_id, filename='incidents.csv') }}">Download incidents.csv</a></li>
+    <li><a href="{{ url_for('uploaded_output', upload_id=upload_id, filename='summary.json') }}">Download summary.json</a></li>
+    <li><a href="{{ url_for('uploaded_output', upload_id=upload_id, filename='analysis.db') }}">Download analysis.db</a></li>
+  </ul>
+  <form method="post" action="{{ url_for('delete_uploaded_analysis', upload_id=upload_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button button-danger" type="submit">Delete this analysis</button>
+  </form>
+</section>
+{% endblock %}

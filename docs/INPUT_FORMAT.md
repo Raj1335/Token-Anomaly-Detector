@@ -50,3 +50,5 @@ python main.py analyze --input logs.csv --out out\analysis --geo-table networks.
 ```
 
 The default baseline is the first 70% of the file's timestamp span. `--baseline-days N` starts at the earliest event; `--baseline-until` takes an ISO-8601 timestamp. The two options are mutually exclusive.
+
+The same input format is accepted at the authenticated web upload page (`/upload`). Configure `UPLOAD_USERNAME`, `UPLOAD_PASSWORD` (at least 16 characters), and `UPLOAD_SECRET_KEY` (at least 32 characters) before enabling it. Web uploads are limited to 100 MiB and 500,000 rows. Uploaded source files are removed after analysis, but generated results remain until deleted or temporary storage is cleared. See the README's [authenticated web uploads](../README.md#authenticated-web-uploads) section for deployment and storage guidance.

@@ -14,20 +14,25 @@
       <nav class="primary-nav" aria-label="Primary navigation">
         <a href="{{ url_for('index') }}" {% if request.endpoint == "index" %}aria-current="page"{% endif %}>Overview</a>
         <a href="{{ url_for('incidents') }}" {% if request.endpoint in ("incidents", "incident_detail") %}aria-current="page"{% endif %}>Incidents</a>
+        {% if uploads_enabled %}
+          <a href="{{ url_for('upload_logs') }}" {% if request.endpoint in ("upload_logs", "uploaded_result") %}aria-current="page"{% endif %}>Analyze logs</a>
+        {% endif %}
       </nav>
     </div>
   </header>
-  {% if footer_metadata and footer_metadata.source == "imported" %}
-    <div class="demo-banner" role="note">Imported data: {{ footer_metadata.source_filename }}{% if footer_metadata.analyzed_at %}, analysed {{ footer_metadata.analyzed_at|display_ts }}{% endif %}</div>
-  {% elif footer_metadata and footer_metadata.source == "synthetic" %}
-    <div class="demo-banner" role="note">Demo using synthetic data. Not real logs.</div>
+  {% if not hide_dataset_metadata|default(false) %}
+    {% if footer_metadata and footer_metadata.source == "imported" %}
+      <div class="demo-banner" role="note">Imported data: {{ footer_metadata.source_filename }}{% if footer_metadata.analyzed_at %}, analysed {{ footer_metadata.analyzed_at|display_ts }}{% endif %}</div>
+    {% elif footer_metadata and footer_metadata.source == "synthetic" %}
+      <div class="demo-banner" role="note">Demo using synthetic data. Not real logs.</div>
+    {% endif %}
   {% endif %}
   <main class="shell main-content">
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
     <div class="shell footer-inner">
-      {% if footer_metadata %}
+      {% if not hide_dataset_metadata|default(false) and footer_metadata %}
         <span>Seed {{ footer_metadata.seed }}</span>
         {% if footer_metadata.dataset_start_utc and footer_metadata.eval_end_utc %}
           <span>Generation window: {{ footer_metadata.dataset_start_utc|display_ts }} to {{ footer_metadata.eval_end_utc|display_ts }}</span>

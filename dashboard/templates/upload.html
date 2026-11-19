@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Analyze logs | Token Anomaly Detector{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Private analysis</p>
+    <h1>Analyze a log file</h1>
+    <p class="lede">Upload one CSV or JSONL file. The analysis uses the same validation, baseline, and detectors as the CLI.</p>
+  </div>
+</div>
+
+<section class="card panel upload-panel">
+  {% if error %}
+    <div class="upload-error" role="alert"><strong>Could not analyze this file.</strong><pre>{{ error }}</pre></div>
+  {% endif %}
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_logs') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="upload-field">
+      <span>Log file <strong>(required, .csv or .jsonl)</strong></span>
+      <input type="file" name="log_file" accept=".csv,.jsonl" required>
+    </label>
+    <label class="upload-field">
+      <span>Geo table <small>(optional CSV: cidr,lat,lon,city)</small></span>
+      <input type="file" name="geo_table" accept=".csv">
+    </label>
+    <div class="upload-options">
+      <label class="upload-field">
+        <span>Baseline days <small>(from earliest event)</small></span>
+        <input type="number" name="baseline_days" min="1" step="1">
+      </label>
+      <label class="upload-field">
+        <span>Baseline until <small>(timezone-aware ISO timestamp)</small></span>
+        <input type="text" name="baseline_until" placeholder="2026-03-10T00:00:00Z">
+      </label>
+    </div>
+    <label class="upload-field">
+      <span>Column mapping <small>(input_name=canonical_name, comma-separated)</small></span>
+      <input type="text" name="column_map" placeholder="when=timestamp,token=token_id,ip=source_ip">
+    </label>
+    <label class="upload-check">
+      <input type="checkbox" name="assume_utc">
+      <span>Assume UTC for timestamps without a timezone</span>
+    </label>
+    <label class="upload-check">
+      <input type="checkbox" name="skip_bad_rows">
+      <span>Skip invalid rows and include the skipped count</span>
+    </label>
+    <p class="upload-note">Maximum upload size: 100 MiB. Maximum data rows: 500,000. Uploaded source files are removed after analysis; generated results remain until deleted or the server's temporary storage is cleared.</p>
+    <button class="button button-primary" type="submit">Upload and analyze</button>
+  </form>
+</section>
+{% endblock %}

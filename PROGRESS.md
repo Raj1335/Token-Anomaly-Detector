@@ -5,3 +5,4 @@
 - 2026-11-18 Phase 4: implemented the read-only Flask dashboard.
 - 2026-11-18 Phase 5: completed specification and project documentation.
 - 2026-11-19: added validated CSV/JSONL ingestion, baseline controls, optional CIDR geolocation, safe exports, standalone reports, and imported-data dashboard support.
+- 2026-11-19: added authenticated web upload and per-analysis results/download/delete routes with size and row caps.

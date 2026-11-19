@@ -1,15 +1,23 @@
 """Read-only local Flask dashboard for incidents and evaluation results."""
 
+import hmac
 import json
+import os
 import re
+import secrets
+import shutil
 import sqlite3
+import tempfile
+import uuid
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, abort, render_template, request
+from flask import Flask, Response, abort, redirect, render_template, request, send_file, session, url_for
 
 from core.timeutil import parse_ts
+from data.analyze import analyze_input
+from data.log_input import InputFileError
 
 SEVERITIES = ("HIGH", "MEDIUM", "LOW")
 DETECTOR_LABELS = {
@@ -23,6 +31,10 @@ CAMPAIGN_DESCRIPTIONS = {
     "camp_scope": "An integration begins querying objects rare in its baseline.",
     "camp_temporal": "A session token becomes active during an unusual UTC hour.",
     "camp_drift": "A shared integration replay spans many tenants in a short window.",
+}
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+UPLOAD_OUTPUTS = {
+    "alerts.csv", "analysis.db", "incidents.csv", "report.html", "summary.json",
 }
 
 
@@ -62,6 +74,28 @@ def create_app(db_path: str | Path) -> Flask:
     """Create the read-only dashboard application for the requested database."""
     app = Flask(__name__)
     app.config["DATABASE"] = str(db_path)
+    app.config["SECRET_KEY"] = os.environ.get("UPLOAD_SECRET_KEY")
+    app.secret_key = app.config["SECRET_KEY"]
+    app.config["UPLOAD_USERNAME"] = os.environ.get("UPLOAD_USERNAME", "")
+    app.config["UPLOAD_PASSWORD"] = os.environ.get("UPLOAD_PASSWORD", "")
+    app.config["UPLOADS_ENABLED"] = (
+        bool(app.config["UPLOAD_USERNAME"])
+        and len(app.config["UPLOAD_PASSWORD"]) >= 16
+        and bool(app.config["SECRET_KEY"])
+        and len(app.config["SECRET_KEY"]) >= 32
+    )
+    app.config["ANALYSIS_DATA_DIR"] = Path(
+        os.environ.get(
+            "ANALYSIS_DATA_DIR",
+            str(Path(tempfile.gettempdir()) / "token-anomaly-detector-uploads"),
+        )
+    )
+    app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = os.environ.get(
+        "UPLOAD_COOKIE_SECURE", "1"
+    ).strip().lower() not in ("0", "false", "no")
     app.jinja_env.filters["display_ts"] = _display_ts
     app.jinja_env.filters["number"] = _number
     app.jinja_env.filters["duration"] = _duration
@@ -71,6 +105,14 @@ def create_app(db_path: str | Path) -> Flask:
         """Add the required browser security headers to every response."""
         response.headers["Content-Security-Policy"] = "default-src 'self'"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        if request.path == "/upload" or request.path.startswith("/uploads/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
+        if re.fullmatch(r"/uploads/[a-f0-9]{32}/report\.html", request.path):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'unsafe-inline'; "
+                "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+            )
         return response
 
     @app.errorhandler(404)
@@ -86,12 +128,24 @@ def create_app(db_path: str | Path) -> Flask:
             ),
         ), 404
 
+    @app.errorhandler(413)
+    def upload_too_large(_error):
+        """Explain the configured request-size limit without reflecting input."""
+        return Response(
+            "The upload exceeds the 100 MiB request-size limit.\n",
+            status=413,
+            content_type="text/plain; charset=utf-8",
+        )
+
     @app.context_processor
     def common_template_data() -> dict[str, Any]:
         """Provide dataset metadata to the shared page footer when available."""
         path = Path(app.config["DATABASE"])
         if not path.exists():
-            return {"footer_metadata": None}
+            return {
+                "footer_metadata": None,
+                "uploads_enabled": app.config["UPLOADS_ENABLED"],
+            }
         connection: sqlite3.Connection | None = None
         try:
             connection = _connect(path)
@@ -100,9 +154,15 @@ def create_app(db_path: str | Path) -> Flask:
                 "('seed', 'dataset_start_utc', 'eval_end_utc', 'source', "
                 "'source_filename', 'analyzed_at')"
             ))
-            return {"footer_metadata": metadata}
+            return {
+                "footer_metadata": metadata,
+                "uploads_enabled": app.config["UPLOADS_ENABLED"],
+            }
         except sqlite3.Error:
-            return {"footer_metadata": None}
+            return {
+                "footer_metadata": None,
+                "uploads_enabled": app.config["UPLOADS_ENABLED"],
+            }
         finally:
             if connection is not None:
                 connection.close()
@@ -115,6 +175,235 @@ def create_app(db_path: str | Path) -> Flask:
             return _connect(app.config["DATABASE"])
         except sqlite3.Error:
             abort(404)
+
+    def upload_auth_error() -> Response | None:
+        """Require configured shared credentials for private upload endpoints."""
+        if not app.config["UPLOADS_ENABLED"]:
+            return Response(
+                "Log uploads are disabled: configure strong upload credentials and a secret key.\n",
+                status=503,
+                content_type="text/plain; charset=utf-8",
+            )
+        credentials = request.authorization
+        valid = credentials is not None
+        if credentials is not None:
+            username_ok = hmac.compare_digest(
+                (credentials.username or "").encode("utf-8"),
+                app.config["UPLOAD_USERNAME"].encode("utf-8"),
+            )
+            password_ok = hmac.compare_digest(
+                (credentials.password or "").encode("utf-8"),
+                app.config["UPLOAD_PASSWORD"].encode("utf-8"),
+            )
+            valid = username_ok and password_ok
+        if not valid:
+            return Response(
+                "Authentication required.\n",
+                status=401,
+                headers={"WWW-Authenticate": 'Basic realm="Token log analysis"'},
+                content_type="text/plain; charset=utf-8",
+            )
+        return None
+
+    def upload_csrf_token() -> str:
+        """Get or create the per-session CSRF token for upload forms."""
+        token = session.get("upload_csrf")
+        if not isinstance(token, str):
+            token = secrets.token_urlsafe(32)
+            session["upload_csrf"] = token
+        return token
+
+    def csrf_is_valid() -> bool:
+        """Validate a state-changing form submission against the session token."""
+        supplied = request.form.get("csrf_token", "")
+        expected = session.get("upload_csrf", "")
+        return (
+            isinstance(expected, str)
+            and bool(supplied)
+            and hmac.compare_digest(supplied, expected)
+        )
+
+    def upload_directory(upload_id: str) -> Path:
+        """Resolve an opaque upload ID to its stored analysis directory."""
+        if not re.fullmatch(r"[a-f0-9]{32}", upload_id):
+            abort(404)
+        return Path(app.config["ANALYSIS_DATA_DIR"]) / upload_id
+
+    @app.route("/upload", methods=["GET", "POST"])
+    def upload_logs():
+        """Accept, analyze, and report one authenticated CSV or JSONL upload."""
+        auth_error = upload_auth_error()
+        if auth_error is not None:
+            return auth_error
+        if request.method == "GET":
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                hide_dataset_metadata=True,
+            )
+        if not csrf_is_valid():
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="The form expired or was invalid. Please try again.",
+                hide_dataset_metadata=True,
+            ), 400
+
+        log_file = request.files.get("log_file")
+        if log_file is None or not log_file.filename:
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="Choose a CSV or JSONL log file.",
+                hide_dataset_metadata=True,
+            ), 400
+        original_filename = log_file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        if (
+            not original_filename
+            or len(original_filename) > 256
+            or any(ord(character) < 32 or ord(character) == 127 for character in original_filename)
+        ):
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="The uploaded filename is invalid or longer than 256 characters.",
+                hide_dataset_metadata=True,
+            ), 400
+        suffix = Path(original_filename).suffix.lower()
+        if suffix not in (".csv", ".jsonl"):
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="Upload a .csv or .jsonl file.",
+                hide_dataset_metadata=True,
+            ), 400
+
+        geo_file = request.files.get("geo_table")
+        if geo_file is not None and geo_file.filename:
+            geo_name = geo_file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+            if Path(geo_name).suffix.lower() != ".csv":
+                return render_template(
+                    "upload.html", csrf_token=upload_csrf_token(),
+                    error="The geo table must be a .csv file.",
+                    hide_dataset_metadata=True,
+                ), 400
+        else:
+            geo_file = None
+
+        baseline_days_text = request.form.get("baseline_days", "").strip()
+        baseline_until = request.form.get("baseline_until", "").strip() or None
+        try:
+            baseline_days = int(baseline_days_text) if baseline_days_text else None
+        except ValueError:
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="Baseline days must be a positive integer.",
+                hide_dataset_metadata=True,
+            ), 400
+        if baseline_days is not None and baseline_until is not None:
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error="Choose either baseline days or a baseline-until timestamp.",
+                hide_dataset_metadata=True,
+            ), 400
+
+        upload_id = uuid.uuid4().hex
+        upload_dir = upload_directory(upload_id)
+        source_path = upload_dir / f"input{suffix}"
+        geo_path = upload_dir / "geo-table.csv" if geo_file is not None else None
+        output_dir = upload_dir / "analysis"
+        upload_directory_created = False
+        try:
+            upload_dir.mkdir(parents=True, mode=0o700)
+            upload_directory_created = True
+            log_file.save(source_path)
+            if geo_file is not None and geo_path is not None:
+                geo_file.save(geo_path)
+            report = analyze_input(
+                source_path,
+                output_dir,
+                source_filename=original_filename,
+                baseline_days=baseline_days,
+                baseline_until=baseline_until,
+                geo_table=geo_path,
+                column_map=request.form.get("column_map", "").strip() or None,
+                assume_utc=request.form.get("assume_utc") == "on",
+                skip_bad_rows=request.form.get("skip_bad_rows") == "on",
+                max_rows=500_000,
+            )
+        except (InputFileError, OSError, sqlite3.Error, ValueError) as error:
+            if upload_directory_created:
+                shutil.rmtree(upload_dir)
+            return render_template(
+                "upload.html", csrf_token=upload_csrf_token(),
+                error=str(error), hide_dataset_metadata=True,
+            ), 400
+
+        for staged_file in (source_path, geo_path):
+            if staged_file is not None:
+                try:
+                    staged_file.unlink(missing_ok=True)
+                except OSError:
+                    app.logger.warning("Could not remove staged upload file %s", staged_file)
+        return render_template(
+            "upload_result.html",
+            upload_id=upload_id,
+            source_filename=original_filename,
+            report=report,
+            csrf_token=upload_csrf_token(),
+            hide_dataset_metadata=True,
+        )
+
+    @app.route("/uploads/<upload_id>")
+    def uploaded_result(upload_id: str):
+        """Show the summary for an authenticated analysis."""
+        auth_error = upload_auth_error()
+        if auth_error is not None:
+            return auth_error
+        directory = upload_directory(upload_id) / "analysis"
+        summary_path = directory / "summary.json"
+        if not summary_path.is_file():
+            abort(404)
+        try:
+            report = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            abort(404)
+        return render_template(
+            "upload_result.html",
+            upload_id=upload_id,
+            source_filename=report["run_parameters"]["input_file"],
+            report=report,
+            csrf_token=upload_csrf_token(),
+            hide_dataset_metadata=True,
+        )
+
+    @app.route("/uploads/<upload_id>/<filename>")
+    def uploaded_output(upload_id: str, filename: str):
+        """Serve only generated report artifacts to the authenticated uploader."""
+        auth_error = upload_auth_error()
+        if auth_error is not None:
+            return auth_error
+        if filename not in UPLOAD_OUTPUTS:
+            abort(404)
+        path = upload_directory(upload_id) / "analysis" / filename
+        if not path.is_file():
+            abort(404)
+        return send_file(
+            path,
+            as_attachment=filename != "report.html",
+            download_name=filename,
+            max_age=0,
+        )
+
+    @app.route("/uploads/<upload_id>/delete", methods=["POST"])
+    def delete_uploaded_analysis(upload_id: str):
+        """Delete a stored analysis after an authenticated CSRF-checked request."""
+        auth_error = upload_auth_error()
+        if auth_error is not None:
+            return auth_error
+        if not csrf_is_valid():
+            abort(400)
+        directory = upload_directory(upload_id)
+        if not directory.is_dir():
+            abort(404)
+        shutil.rmtree(directory)
+        session.pop("upload_csrf", None)
+        return redirect(url_for("upload_logs"))
 
     @app.route("/healthz")
     def healthz():

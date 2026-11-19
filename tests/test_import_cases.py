@@ -1,14 +1,18 @@
 """Tests for safe user-supplied log ingestion, analysis, and report exports."""
 
 import csv
+import base64
 import contextlib
 import io
 import json
+import os
+import re
 import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from core.timeutil import format_ts
 from data.analyze import analyze_input, export_sample_csv
@@ -327,6 +331,149 @@ class SampleRoundTripTests(unittest.TestCase):
         overview = client.get("/")
         self.assertIn(b"No ground truth for imported data", overview.data)
         self.assertNotIn(b"Evaluation results", overview.data)
+
+
+class WebUploadTests(unittest.TestCase):
+    """Verify authenticated, CSRF-protected web uploads and stored results."""
+
+    def setUp(self) -> None:
+        """Create isolated upload storage and enable local HTTP test cookies."""
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.environment = patch.dict(os.environ, {
+            "UPLOAD_USERNAME": "test-analyst",
+            "UPLOAD_PASSWORD": "test-password-at-least-16",
+            "UPLOAD_SECRET_KEY": "test-secret-key-with-at-least-32-characters",
+            "UPLOAD_COOKIE_SECURE": "0",
+            "ANALYSIS_DATA_DIR": str(self.root / "uploads"),
+        })
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.addCleanup(self.tempdir.cleanup)
+        self.client = create_app(self.root / "synthetic.db").test_client()
+        credential = base64.b64encode(
+            b"test-analyst:test-password-at-least-16"
+        ).decode("ascii")
+        self.auth = {"Authorization": f"Basic {credential}"}
+
+    def test_authenticated_upload_report_download_and_delete(self) -> None:
+        """Analyze a posted CSV, guard results, and delete them with a CSRF token."""
+        unauthorized = self.client.get("/upload")
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertIn("WWW-Authenticate", unauthorized.headers)
+        wrong_credential = base64.b64encode(
+            b"test-analyst:incorrect-password"
+        ).decode("ascii")
+        self.assertEqual(
+            self.client.get(
+                "/upload", headers={"Authorization": f"Basic {wrong_credential}"}
+            ).status_code,
+            401,
+        )
+        form = self.client.get("/upload", headers=self.auth)
+        self.assertEqual(form.status_code, 200)
+        self.assertIn(b"Analyze a log file", form.data)
+        self.assertEqual(
+            form.headers.get("Content-Security-Policy"), "default-src 'self'"
+        )
+        self.assertEqual(form.headers.get("Cache-Control"), "no-store")
+        self.assertIn(b">Analyze logs</a>", form.data)
+        token_match = re.search(rb'name="csrf_token" value="([^"]+)"', form.data)
+        self.assertIsNotNone(token_match)
+        assert token_match is not None
+        csrf_token = token_match.group(1).decode("ascii")
+
+        csv_content = (
+            "timestamp,token_id,source_ip\n"
+            "2026-01-01T00:00:00Z,web_token,192.0.2.1\n"
+            "2026-01-01T01:00:00Z,web_token,192.0.2.1\n"
+            "2026-01-01T02:00:00Z,web_token,192.0.2.1\n"
+            "2026-01-01T03:00:00Z,web_token,192.0.2.1\n"
+        ).encode("utf-8")
+        response = self.client.post(
+            "/upload",
+            headers=self.auth,
+            data={
+                "csrf_token": csrf_token,
+                "log_file": (io.BytesIO(csv_content), "customer-events.csv"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"customer-events.csv", response.data)
+        self.assertIn(b"Analysis complete", response.data)
+        upload_match = re.search(
+            rb'/uploads/([a-f0-9]{32})/report\.html', response.data
+        )
+        self.assertIsNotNone(upload_match)
+        assert upload_match is not None
+        upload_id = upload_match.group(1).decode("ascii")
+        upload_dir = self.root / "uploads" / upload_id
+        self.assertFalse((upload_dir / "input.csv").exists())
+        self.assertTrue((upload_dir / "analysis" / "analysis.db").is_file())
+
+        self.assertEqual(self.client.get(f"/uploads/{upload_id}").status_code, 401)
+        report_response = self.client.get(
+            f"/uploads/{upload_id}/report.html", headers=self.auth
+        )
+        self.assertEqual(report_response.status_code, 200)
+        self.assertIn(b"Token Anomaly Analysis Report", report_response.data)
+        self.assertEqual(report_response.headers.get("Cache-Control"), "no-store")
+        self.assertEqual(
+            report_response.headers.get("Content-Security-Policy"),
+            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
+            "form-action 'none'; frame-ancestors 'none'",
+        )
+        self.assertNotIn(b"<script", report_response.data.lower())
+        report_response.close()
+        self.assertEqual(
+            self.client.get(
+                f"/uploads/{upload_id}/unexpected.txt", headers=self.auth
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/uploads/{upload_id}/delete",
+                headers=self.auth,
+                data={"csrf_token": "invalid"},
+            ).status_code,
+            400,
+        )
+        deleted = self.client.post(
+            f"/uploads/{upload_id}/delete",
+            headers=self.auth,
+            data={"csrf_token": csrf_token},
+        )
+        self.assertEqual(deleted.status_code, 302)
+        self.assertFalse(upload_dir.exists())
+
+    def test_upload_endpoint_fails_closed_without_auth_configuration(self) -> None:
+        """Do not enable uploads unless credentials and the signing key are set."""
+        with patch.dict(os.environ, {
+            "UPLOAD_USERNAME": "",
+            "UPLOAD_PASSWORD": "",
+            "UPLOAD_SECRET_KEY": "",
+        }):
+            client = create_app(self.root / "synthetic.db").test_client()
+            response = client.get("/upload")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn(b"Log uploads are disabled", response.data)
+
+    def test_upload_size_limit_returns_a_clear_413(self) -> None:
+        """Return a clear error when the configured request cap is exceeded."""
+        self.client.application.config["MAX_CONTENT_LENGTH"] = 64
+        response = self.client.post(
+            "/upload",
+            headers=self.auth,
+            data={
+                "csrf_token": "oversized",
+                "log_file": (io.BytesIO(b"x" * 256), "large.csv"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 413)
+        self.assertIn(b"100 MiB request-size limit", response.data)
 
 
 if __name__ == "__main__":

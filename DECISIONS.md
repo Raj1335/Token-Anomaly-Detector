@@ -15,3 +15,4 @@ Decided to split imported data by timestamp span rather than row order, because 
 Decided to preserve unknown geography as null and disable travel detection when no location data exists, because fabricated coordinates would create misleading alerts.
 Decided to leave imported labels empty and skip evaluation, because user-provided data has no ground truth.
 Decided to prefix spreadsheet-formula-like CSV cells with a quote and HTML-escape report values, because log fields are untrusted.
+Decided to protect web-upload and result routes with one shared HTTP Basic account, CSRF tokens, and per-analysis output directories, because this deployment is single-operator and must not expose imported logs publicly.

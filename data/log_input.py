@@ -133,14 +133,21 @@ def _csv_rows(path: Path) -> tuple[list[str], Iterator[tuple[int, dict[str, Any]
             headers = next(reader)
         except StopIteration:
             headers = []
+        except csv.Error as error:
+            raise InputFileError(
+                f"CSV header line {reader.line_num}: {error}"
+            ) from error
     if not headers:
         raise InputFileError("CSV file is missing a header row")
 
     def rows() -> Iterator[tuple[int, dict[str, Any]]]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle)
-            for row in reader:
-                yield reader.line_num, row
+            try:
+                for row in reader:
+                    yield reader.line_num, row
+            except csv.Error as error:
+                yield reader.line_num, {"__parse_error__": f"invalid CSV: {error}"}
 
     return [str(item) for item in headers], rows()
 
