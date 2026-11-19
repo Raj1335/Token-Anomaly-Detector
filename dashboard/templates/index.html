@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Security overview</p>
     <h1>Overview</h1>
-    <p class="lede">A concise view of synthetic token activity and detector results.</p>
+    <p class="lede">{% if footer_metadata and footer_metadata.source == "imported" %}A concise view of imported token activity and detector results.{% else %}A concise view of synthetic token activity and detector results.{% endif %}</p>
   </div>
   <a class="button button-secondary" href="{{ url_for('incidents') }}">Review incidents</a>
 </div>
@@ -66,6 +66,7 @@
   </section>
 </div>
 
+{% if not footer_metadata or footer_metadata.source != "imported" %}
 <section class="card panel evaluation-panel">
   <div class="section-heading">
     <div><p class="eyebrow">Validation</p><h2>Evaluation results</h2></div>
@@ -94,4 +95,7 @@
     </div>
   {% endif %}
 </section>
+{% else %}
+<p class="lede">No ground truth for imported data. Campaign evaluation is not available.</p>
+{% endif %}
 {% endblock %}

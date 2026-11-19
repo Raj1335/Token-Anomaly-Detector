@@ -54,14 +54,17 @@ class SharedScaffoldTests(unittest.TestCase):
     def test_schema_is_created(self) -> None:
         """Build the schema on an in-memory connection."""
         connection = sqlite3.connect(":memory:")
-        create_schema(connection)
-        names = {
-            row[0] for row in connection.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
-        self.assertIn("events", names)
-        self.assertIn("labels", names)
+        try:
+            create_schema(connection)
+            names = {
+                row[0] for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            self.assertIn("events", names)
+            self.assertIn("labels", names)
+        finally:
+            connection.close()
 
 
 class DetectorTests(unittest.TestCase):

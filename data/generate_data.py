@@ -259,6 +259,7 @@ def _make_rows(
         "baseline_end_utc": format_ts(baseline_end),
         "eval_end_utc": format_ts(DATASET_START + timedelta(days=14)),
         "schema_version": SCHEMA_VERSION,
+        "source": "synthetic",
     }
     return events, labels, metadata
 

@@ -16,8 +16,8 @@ class Event:
     principal: str
     tenant_id: str
     source_ip: str
-    geo_lat: float
-    geo_lon: float
+    geo_lat: float | None
+    geo_lon: float | None
     geo_city: str
     object_type: str
     action: str

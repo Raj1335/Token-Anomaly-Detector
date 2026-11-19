@@ -1,40 +1,70 @@
-# Token Anomaly Detector MVP
+# Token Anomaly Detector
 
-This project is a synthetic OAuth/session-token anomaly detector. It combines statistical baselines with explainable rules and a small Flask dashboard.
+A local CLI tool for analyzing token-authenticated API request logs. It profiles a historical baseline, detects unusual travel, scope behavior, timing, and request volume, then writes a SQLite database, CSV exports, JSON summary, and standalone HTML report. A synthetic generator remains available for demos and repeatable tests.
 
-## Quickstart (PowerShell)
+## What it does
+
+- Accepts user-supplied CSV and JSONL logs; it does not upload data or make network requests.
+- Learns detector profiles from an early baseline window and analyzes later events.
+- Produces token-level incidents and simulated response labels; it does not revoke real credentials or contact anyone.
+- Provides a local, read-only Flask dashboard for imported and synthetic databases.
+
+## Quickstart with your own CSV (PowerShell)
 
 ```powershell
 python -m venv venv
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
-.\venv\Scripts\python.exe main.py run-all --seed 1
-.\venv\Scripts\python.exe main.py dashboard --db data/events.db --port 5000
+.\venv\Scripts\python.exe main.py validate --input data\sample_logs.csv
+.\venv\Scripts\python.exe main.py analyze --input data\sample_logs.csv --out out\sample-analysis
+Start-Process .\out\sample-analysis\report.html
+.\venv\Scripts\python.exe main.py dashboard --db out\sample-analysis\analysis.db
 ```
 
-Open `http://127.0.0.1:5000`. Dashboard routes include `/`, `/incidents`, `/incident/<id>`, and `/token/<token_id>`.
+The dashboard opens at `http://127.0.0.1:5000`. The included [data/sample_logs.csv](data/sample_logs.csv) contains 2,000 **synthetic** rows; it is a format example, not real customer data. Use `--force` to replace an existing analysis output directory.
+
+## Input format
+
+See [docs/INPUT_FORMAT.md](docs/INPUT_FORMAT.md) for the CSV/JSONL schema, validation rules, column mapping, and examples.
+
+## Geo options
+
+Impossible-travel detection requires coordinates. Provide both `geo_lat` and `geo_lon` columns in your logs, or pass `--geo-table path.csv` with `cidr,lat,lon,city` columns. CIDR matches use the most-specific network. Without usable coordinates, travel detection is disabled and noted in the summary. Coordinates are never guessed and there are no geo-IP lookups.
+
+## How the baseline works
+
+Events are sorted by timestamp before event IDs are assigned. By default, the baseline is the first 70% of the input time span; the remaining events are the evaluation window. Override this with `--baseline-days N` (from the earliest event) or `--baseline-until "YYYY-MM-DDTHH:MM:SSZ"`. Baselines shorter than three days or 1,000 events produce warnings, not errors. Check that the selected baseline represents clean, normal activity.
+
+## Limitations
+
+- A clean historical baseline is needed; an unrepresentative baseline can hide anomalies or create false positives.
+- You must map your log columns to this input schema. There are no built-in Okta, Entra ID, or Salesforce adapters yet.
+- Geographic accuracy depends on your event coordinates or CIDR table.
+- The dashboard has no authentication; bind it to localhost and do not expose it publicly.
+- Detector thresholds were tuned on synthetic data only. Results are not evidence of production effectiveness.
+- Low-and-slow behavior that resembles the baseline may evade these rules.
+- The tool only analyzes the fields provided; it does not inspect response payloads for exposed credentials.
+
+## Synthetic demo mode
+
+To generate, detect, and evaluate the built-in synthetic scenarios:
+
+```powershell
+.\venv\Scripts\python.exe main.py run-all --seed 1
+.\venv\Scripts\python.exe main.py dashboard --db data\events.db
+.\venv\Scripts\python.exe -m unittest tests.known_answer_cases -v
+```
+
+The generator is deterministic by seed and writes only synthetic events and ground-truth labels.
 
 ## Live demo
 
 Live demo: **[Render demo URL](https://your-render-demo-url.onrender.com)** (replace this placeholder after deployment).
 
-To deploy, create a Render web service from this repository and use the included `render.yaml` settings. The build command installs the requirements and generates, detects, and evaluates the seed-1 synthetic dataset. The service runs through Gunicorn and exposes `/healthz`.
+To deploy, create a Render web service from this repository and use the included `render.yaml` settings. The build command installs requirements and runs the seed-1 synthetic pipeline. The service runs through Gunicorn and exposes `/healthz`.
 
-The configured Render commands are `pip install -r requirements.txt && python main.py run-all --seed 1` and `gunicorn wsgi:app --bind 0.0.0.0:$PORT`. On Windows, run the Flask dashboard locally with `python main.py dashboard --db data/events.db`; Gunicorn does not run on Windows.
+The configured Render commands are `pip install -r requirements.txt && python main.py run-all --seed 1` and `gunicorn wsgi:app --bind 0.0.0.0:$PORT`. On Windows, run Flask with `python main.py dashboard --db data\events.db`; Gunicorn does not run on Windows.
 
-Render's free tier sleeps when idle, so the first page load after a quiet period can take up to about a minute. The demo has no authentication because it serves only synthetic data. Do not deploy real logs or credentials to this demo.
-
-## Architecture
-
-```text
-main.py
-  -> data/generate_data.py -> SQLite events + labels
-  -> core/pipeline.py -> baseline fit -> detectors -> alerts
-  -> core/correlate.py -> incidents + simulated response
-  -> core/evaluate.py -> campaign report
-  -> dashboard/app.py -> read-only local view
-```
-
-All detection logic uses timezone-aware UTC datetimes and in-memory dataclasses. Ground-truth labels are read only by evaluation code.
+Render's free tier sleeps when idle, so the first page load after a quiet period can take up to about a minute. The demo has no authentication because it serves only synthetic data. Do not deploy real logs or credentials to it.
 
 ## Tested environment
 
@@ -42,43 +72,3 @@ All detection logic uses timezone-aware UTC datetimes and in-memory dataclasses.
 - Faker: 37.6.0
 - Flask: 3.1.2
 - Gunicorn: 23.0.0 (Render/Linux only)
-
-The brief targets Python 3.11+; Python 3.14.7 is the tested environment.
-
-## Seed 2 held-out results
-
-| Campaign | Result |
-|---|---|
-| camp_travel | PASS |
-| camp_scope | PASS |
-| camp_temporal | PASS |
-| camp_drift | PASS |
-
-Benign false-positive fraction: 6 of 17,382 evaluation benign events (0.03%). Seed 1 was used for threshold tuning; seed 2 is held out and untuned.
-
-## Commands
-
-```powershell
-.\venv\Scripts\python.exe main.py generate --seed 1
-.\venv\Scripts\python.exe main.py detect --db data/events.db
-.\venv\Scripts\python.exe main.py evaluate --db data/events.db
-.\venv\Scripts\python.exe main.py run-all --seed 2
-.\venv\Scripts\python.exe -m unittest tests.known_answer_cases -v
-```
-
-## Honest limitations
-
-- Results use synthetic data authored alongside the detector rules, so they demonstrate catching modelled attacks, not production effectiveness.
-- Thresholds are tuned on seed 1 and reported on seed 2.
-- Detectors need baseline history and have cold-start skip policies.
-- Temporal detection is blind for 24/7 integrations.
-- Geographic coordinates and city offsets are simulated.
-- VPN and mobile users can produce real-world false positives.
-- A low-and-slow attacker that mimics baseline behavior can evade these rules.
-- Revocation and notification are simulated SQLite actions.
-- The dashboard has no authentication and must not be exposed publicly as-is.
-
-## MITRE ATT&CK
-
-- T1528 - Steal Application Access Token: verify at attack.mitre.org
-- T1550.001 - Application Access Token: verify at attack.mitre.org

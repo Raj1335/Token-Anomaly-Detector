@@ -67,6 +67,10 @@ class VolumeSpikeDetector:
     def detect(self, events: list[Event]) -> list[Alert]:
         """Emit rate alerts on threshold crossings and causal new-IP fan-out alerts."""
         ordered = sorted(events, key=lambda item: (item.ts, item.event_id))
+        evaluation_tokens = {event.token_id for event in ordered}
+        self.skipped["no baseline"] = sum(
+            token_id not in self.baseline_ips for token_id in evaluation_tokens
+        )
         alerts = self._rate_alerts(ordered)
         alerts.extend(self._fanout_alerts(ordered))
         return alerts
@@ -110,10 +114,6 @@ class VolumeSpikeDetector:
         active: dict[str, deque[tuple[datetime, str]]] = defaultdict(deque)
         alerted: dict[str, set[str]] = defaultdict(set)
         alerts: list[Alert] = []
-        eval_tokens = {event.token_id for event in events}
-        for token_id in eval_tokens:
-            if token_id not in self.baseline_ips:
-                self.skipped["new_ip_fanout: no baseline"] += 1
         for event in events:
             if event.token_id not in self.baseline_ips:
                 continue

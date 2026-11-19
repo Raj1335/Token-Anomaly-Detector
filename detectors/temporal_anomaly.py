@@ -40,9 +40,10 @@ class TemporalAnomalyDetector:
         """Alert on evaluation events whose smoothed UTC-hour share is too low."""
         alerts: list[Alert] = []
         self.skipped = Counter()
+        skipped_tokens: set[tuple[str, str]] = set()
         for event in events:
             if self.baseline_counts.get(event.token_id, 0) < MIN_BASELINE_EVENTS:
-                self.skipped["fewer than minimum baseline events"] += 1
+                skipped_tokens.add((event.token_id, "fewer than minimum baseline events"))
                 continue
             share = self.hour_share[event.token_id][event.ts.hour]
             if share < TEMPORAL_MIN_SHARE:
@@ -54,4 +55,5 @@ class TemporalAnomalyDetector:
                         {"utc_hour": event.ts.hour, "baseline_share": share},
                     )
                 )
+        self.skipped.update(reason for _, reason in skipped_tokens)
         return alerts

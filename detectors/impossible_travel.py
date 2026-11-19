@@ -51,6 +51,12 @@ class ImpossibleTravelDetector:
         for event in sorted(events, key=lambda item: (item.ts, item.event_id)):
             prior = previous.get(event.token_id)
             if prior is not None:
+                if (
+                    prior.geo_lat is None or prior.geo_lon is None
+                    or event.geo_lat is None or event.geo_lon is None
+                ):
+                    previous[event.token_id] = event
+                    continue
                 distance = haversine_km(prior.geo_lat, prior.geo_lon, event.geo_lat, event.geo_lon)
                 hours = max((event.ts - prior.ts).total_seconds() / 3600.0, 1.0 / 3600.0)
                 speed = distance / hours

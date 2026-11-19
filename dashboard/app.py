@@ -97,7 +97,8 @@ def create_app(db_path: str | Path) -> Flask:
             connection = _connect(path)
             metadata = dict(connection.execute(
                 "SELECT key, value FROM metadata WHERE key IN "
-                "('seed', 'dataset_start_utc', 'eval_end_utc')"
+                "('seed', 'dataset_start_utc', 'eval_end_utc', 'source', "
+                "'source_filename', 'analyzed_at')"
             ))
             return {"footer_metadata": metadata}
         except sqlite3.Error:

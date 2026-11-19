@@ -26,7 +26,7 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS events (
             event_id INTEGER PRIMARY KEY, ts TEXT NOT NULL, token_id TEXT NOT NULL,
             token_type TEXT NOT NULL, principal TEXT NOT NULL, tenant_id TEXT NOT NULL,
-            source_ip TEXT NOT NULL, geo_lat REAL NOT NULL, geo_lon REAL NOT NULL,
+            source_ip TEXT NOT NULL, geo_lat REAL, geo_lon REAL,
             geo_city TEXT NOT NULL, object_type TEXT NOT NULL, action TEXT NOT NULL,
             records_returned INTEGER NOT NULL, granted_scopes_json TEXT NOT NULL
         );

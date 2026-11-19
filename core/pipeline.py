@@ -2,7 +2,6 @@
 
 import json
 import sqlite3
-from datetime import datetime
 
 from core.correlate import correlate
 from core.models import Alert, Event
@@ -33,18 +32,21 @@ def load_events(connection: sqlite3.Connection) -> tuple[list[Event], list[Event
     return baseline, evaluation
 
 
-def run_detection(db_path: str) -> list[Alert]:
+def run_detection(db_path: str, disabled_detectors: set[str] | None = None) -> list[Alert]:
     """Reset derived tables, fit on baseline, detect evaluation, and correlate."""
     connection = sqlite3.connect(db_path)
     connection.execute("PRAGMA foreign_keys = ON")
     try:
         baseline, evaluation = load_events(connection)
-        detectors = [
+        all_detectors = [
             ImpossibleTravelDetector(),
             ScopeCreepDetector(),
             TemporalAnomalyDetector(),
             VolumeSpikeDetector(),
         ]
+        disabled = disabled_detectors or set()
+        detectors = [detector for detector in all_detectors if detector.name not in disabled]
+        skipped: dict[str, dict[str, int]] = {}
         with connection:
             connection.execute(
                 "DELETE FROM alerts"
@@ -57,10 +59,20 @@ def run_detection(db_path: str) -> list[Alert]:
             )
             for detector in detectors:
                 detector.fit(baseline)
+                skipped[detector.name] = dict(detector.skipped)
         alerts: list[Alert] = []
         for detector in detectors:
             alerts.extend(detector.detect(evaluation))
+            skipped[detector.name] = dict(detector.skipped)
         correlate(connection, alerts)
+        with connection:
+            connection.executemany(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES(?, ?)",
+                [
+                    ("disabled_detectors_json", json.dumps(sorted(disabled))),
+                    ("detection_skips_json", json.dumps(skipped, sort_keys=True)),
+                ],
+            )
         return alerts
     finally:
         connection.close()

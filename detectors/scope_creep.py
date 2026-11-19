@@ -9,9 +9,9 @@ def scope_creep(event):
     return False
 
 
-    
 
-    
+
+
 """Detect rare object-action behavior independently of granted permissions."""
 
 from collections import Counter, defaultdict
@@ -51,10 +51,11 @@ class ScopeCreepDetector:
         """Emit deviation and out-of-grant alerts for tokens with enough history."""
         alerts: list[Alert] = []
         self.skipped = Counter()
+        skipped_tokens: set[tuple[str, str]] = set()
         for event in sorted(events, key=lambda item: (item.ts, item.event_id)):
             total = self.baseline_counts.get(event.token_id, 0)
             if total < MIN_BASELINE_EVENTS:
-                self.skipped["fewer than minimum baseline events"] += 1
+                skipped_tokens.add((event.token_id, "fewer than minimum baseline events"))
                 continue
             pair = f"{event.object_type}:{event.action}"
             if pair not in event.granted_scopes:
@@ -75,4 +76,5 @@ class ScopeCreepDetector:
                         {"scope": pair, "relevancy": relevancy},
                     )
                 )
+        self.skipped.update(reason for _, reason in skipped_tokens)
         return alerts

@@ -17,7 +17,11 @@
       </nav>
     </div>
   </header>
-  <div class="demo-banner" role="note">Demo using synthetic data. Not real logs.</div>
+  {% if footer_metadata and footer_metadata.source == "imported" %}
+    <div class="demo-banner" role="note">Imported data: {{ footer_metadata.source_filename }}{% if footer_metadata.analyzed_at %}, analysed {{ footer_metadata.analyzed_at|display_ts }}{% endif %}</div>
+  {% elif footer_metadata and footer_metadata.source == "synthetic" %}
+    <div class="demo-banner" role="note">Demo using synthetic data. Not real logs.</div>
+  {% endif %}
   <main class="shell main-content">
     {% block content %}{% endblock %}
   </main>
