@@ -1,15 +1,97 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Token Anomaly Detector</title></head>
-<body>
-  <h1>Token Anomaly Detector</h1>
-  <p>Events: {{ counts.events }} | Alerts: {{ counts.alerts }} | Incidents: {{ counts.incidents }}</p>
-  <h2>Severity</h2>
-  <ul>{% for row in severities %}<li>{{ row.severity }}: {{ row.count }}</li>{% endfor %}</ul>
-  <h2>Evaluation</h2>
-  {% if report %}{% for campaign, passed in report.campaign_pass.items() %}
-    <p>{{ campaign }}: {{ "PASS" if passed else "FAIL" }}</p>
-  {% endfor %}{% else %}<p>Run evaluation first.</p>{% endif %}
-  <p><a href="/incidents">View incidents</a></p>
-</body>
-</html>
+{% extends "base.html" %}
+{% block title %}Overview | Token Anomaly Detector{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Security overview</p>
+    <h1>Overview</h1>
+    <p class="lede">A concise view of synthetic token activity and detector results.</p>
+  </div>
+  <a class="button button-secondary" href="{{ url_for('incidents') }}">Review incidents</a>
+</div>
+
+<section class="kpi-grid" aria-label="Dataset summary">
+  <article class="card kpi-card"><p class="kpi-label">Events</p><p class="kpi-value">{{ counts.events|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Alerts</p><p class="kpi-value">{{ counts.alerts|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Incidents</p><p class="kpi-value">{{ counts.incidents|number }}</p></article>
+  <article class="card kpi-card"><p class="kpi-label">Revoked tokens</p><p class="kpi-value">{{ counts.revoked|number }}</p></article>
+</section>
+
+<div class="content-grid">
+  <section class="card panel">
+    <div class="section-heading">
+      <div><p class="eyebrow">Response</p><h2>Incident severity</h2></div>
+    </div>
+    {% if severities %}
+      <svg class="severity-chart" viewBox="0 0 480 24" role="img" aria-label="Stacked incident severity distribution">
+        {% set ns = namespace(x=0) %}
+        {% for item in severities %}
+          {% set segment_width = (480 * item.count / (severities|sum(attribute='count'))) if item.count else 0 %}
+          <rect class="chart-segment severity-fill-{{ item.name|lower }}" x="{{ ns.x }}" y="2" width="{{ segment_width }}" height="20" rx="3"></rect>
+          {% set ns.x = ns.x + segment_width %}
+        {% endfor %}
+      </svg>
+      <ul class="legend-list">
+        {% for item in severities %}
+          <li><span class="legend-dot severity-fill-{{ item.name|lower }}"></span>{{ item.name }} <strong>{{ item.count|number }}</strong></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty-inline">No incidents have been detected yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card panel">
+    <div class="section-heading"><div><p class="eyebrow">Detection</p><h2>Alerts by detector</h2></div></div>
+    {% if alert_types %}
+      <div class="table-wrap">
+        <table class="data-table compact-table">
+          <caption class="sr-only">Alert counts grouped by detector and subtype</caption>
+          <thead><tr><th scope="col">Detector</th><th scope="col">Signal</th><th scope="col">Volume</th><th scope="col" class="numeric">Alerts</th></tr></thead>
+          <tbody>{% for item in alert_types %}
+            <tr>
+              <td>{{ item.detector }}</td><td><span class="mono">{{ item.subtype }}</span></td>
+              <td><svg class="mini-bar" viewBox="0 0 180 10" role="img" aria-label="{{ item.count|number }} alerts">
+                <rect class="bar-track" x="0" y="1" width="180" height="8" rx="4"></rect>
+                <rect class="bar-fill" x="0" y="1" width="{{ item.width }}" height="8" rx="4"></rect>
+              </svg></td>
+              <td class="numeric">{{ item.count|number }}</td>
+            </tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty-inline">No alerts are available.</p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card panel evaluation-panel">
+  <div class="section-heading">
+    <div><p class="eyebrow">Validation</p><h2>Evaluation results</h2></div>
+    {% if report %}<span class="meta-label">Seed {{ report.seed }}</span>{% endif %}
+  </div>
+  {% if report %}
+    <div class="campaign-grid">
+      {% for campaign in campaigns %}
+        <article class="campaign-card">
+          <div class="campaign-title"><h3>{{ campaign.name }}</h3>
+            <span class="result-pill {{ 'result-pass' if campaign.passed else 'result-fail' }}">{{ "PASS" if campaign.passed else "FAIL" }}</span>
+          </div>
+          <p>{{ campaign.description }}</p>
+        </article>
+      {% endfor %}
+    </div>
+    <div class="false-positive-summary">
+      <span class="eyebrow">Benign false positives</span>
+      <strong>{{ benign_alerted|number }} / {{ benign|number }}</strong>
+      <span>{{ "%.2f"|format(report.false_positive_benign_fraction * 100) }}% of benign evaluation events</span>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h3>Evaluation has not been run</h3>
+      <p>Generate the synthetic dataset and run evaluation to see campaign results here.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

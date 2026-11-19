@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Token Anomaly Detector{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="{{ url_for('index') }}">Token Anomaly Detector</a>
+      <nav class="primary-nav" aria-label="Primary navigation">
+        <a href="{{ url_for('index') }}" {% if request.endpoint == "index" %}aria-current="page"{% endif %}>Overview</a>
+        <a href="{{ url_for('incidents') }}" {% if request.endpoint in ("incidents", "incident_detail") %}aria-current="page"{% endif %}>Incidents</a>
+      </nav>
+    </div>
+  </header>
+  <div class="demo-banner" role="note">Demo using synthetic data. Not real logs.</div>
+  <main class="shell main-content">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      {% if footer_metadata %}
+        <span>Seed {{ footer_metadata.seed }}</span>
+        {% if footer_metadata.dataset_start_utc and footer_metadata.eval_end_utc %}
+          <span>Generation window: {{ footer_metadata.dataset_start_utc|display_ts }} to {{ footer_metadata.eval_end_utc|display_ts }}</span>
+        {% endif %}
+      {% else %}
+        <span>Dataset metadata unavailable</span>
+      {% endif %}
+      <span>All times UTC</span>
+    </div>
+  </footer>
+</body>
+</html>

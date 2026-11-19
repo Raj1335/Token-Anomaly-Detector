@@ -3,6 +3,7 @@
 import sqlite3
 import tempfile
 import unittest
+import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from dataclasses import replace
@@ -17,6 +18,7 @@ from detectors.volume_spike import VolumeSpikeDetector
 from data.generate_data import generate_database
 from dashboard.app import create_app, readonly_uri
 from core.pipeline import run_detection
+from core.evaluate import evaluate_database
 
 
 def event(
@@ -173,6 +175,8 @@ class PipelineDashboardTests(unittest.TestCase):
         cls.tempdir = tempfile.TemporaryDirectory()
         cls.db = str(Path(cls.tempdir.name) / "events db.db")
         generate_database(1, cls.db)
+        run_detection(cls.db)
+        evaluate_database(cls.db)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -190,13 +194,111 @@ class PipelineDashboardTests(unittest.TestCase):
         connection.close()
 
     def test_dashboard_routes_and_escape(self) -> None:
-        """Serve every route and reject malformed token IDs."""
+        """Serve every dashboard route, enforce headers, and reject inline code."""
         app = create_app(self.db)
         client = app.test_client()
-        self.assertEqual(client.get("/").status_code, 200)
-        self.assertEqual(client.get("/incidents").status_code, 200)
-        self.assertEqual(client.get("/token/sess_001").status_code, 200)
-        self.assertEqual(client.get("/token/bad token").status_code, 404)
+        connection = sqlite3.connect(self.db)
+        incident_id = connection.execute(
+            "SELECT incident_id FROM incidents ORDER BY incident_id LIMIT 1"
+        ).fetchone()[0]
+        connection.execute(
+            "UPDATE events SET principal=? WHERE token_id=?",
+            ("<script>alert(1)</script>", "sess_001"),
+        )
+        connection.commit()
+        connection.close()
+        responses = [
+            client.get("/"),
+            client.get("/incidents"),
+            client.get(f"/incident/{incident_id}"),
+            client.get("/token/sess_001"),
+            client.get("/healthz"),
+        ]
+        for response in responses:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.headers.get("Content-Security-Policy"), "default-src 'self'"
+            )
+            self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+            self.assertNotRegex(response.get_data(as_text=True), r'(?i)\sstyle\s*=')
+            self.assertNotRegex(response.get_data(as_text=True), r"(?i)<script\b")
+        token_body = responses[3].get_data(as_text=True)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", token_body)
+        self.assertNotIn("<script>alert(1)</script>", token_body)
+        malformed = client.get("/token/bad%20token")
+        unknown = client.get("/does-not-exist")
+        self.assertEqual(malformed.status_code, 404)
+        self.assertEqual(unknown.status_code, 404)
+        for response in (malformed, unknown):
+            self.assertEqual(
+                response.headers.get("Content-Security-Policy"), "default-src 'self'"
+            )
+            self.assertNotRegex(response.get_data(as_text=True), r'(?i)\sstyle\s*=')
+            self.assertNotRegex(response.get_data(as_text=True), r"(?i)<script\b")
+        self.assertIn(b"Token Anomaly Detector", unknown.data)
+        self.assertIn(b"style.css", unknown.data)
+
+    def test_severity_filter_whitelist(self) -> None:
+        """Filter HIGH incidents and treat arbitrary values as ALL without reflection."""
+        client = create_app(self.db).test_client()
+        all_ids = set(re.findall(
+            rb'href="/incident/(\d+)"', client.get("/incidents").data
+        ))
+        high_response = client.get("/incidents?severity=HIGH")
+        high_ids = set(re.findall(
+            rb'href="/incident/(\d+)"', high_response.data
+        ))
+        connection = sqlite3.connect(self.db)
+        expected = {
+            str(row[0]).encode("ascii")
+            for row in connection.execute(
+                "SELECT incident_id FROM incidents WHERE severity='HIGH'"
+            )
+        }
+        connection.close()
+        self.assertEqual(high_ids, expected)
+        self.assertTrue(high_ids.issubset(all_ids))
+        invalid_response = client.get("/incidents?severity=%3Cscript%3E")
+        invalid_ids = set(re.findall(
+            rb'href="/incident/(\d+)"', invalid_response.data
+        ))
+        self.assertEqual(invalid_ids, all_ids)
+        self.assertNotIn(b"<script>", invalid_response.data)
+
+    def test_missing_evaluation_report_has_empty_state(self) -> None:
+        """Render a friendly overview when evaluation has not been saved."""
+        connection = sqlite3.connect(self.db)
+        saved = connection.execute(
+            "SELECT id, seed, created_at, report_json FROM eval_report WHERE id=1"
+        ).fetchone()
+        connection.execute("DELETE FROM eval_report WHERE id=1")
+        connection.commit()
+        connection.close()
+        try:
+            response = create_app(self.db).test_client().get("/")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b"Evaluation has not been run", response.data)
+        finally:
+            connection = sqlite3.connect(self.db)
+            connection.execute(
+                "INSERT OR REPLACE INTO eval_report(id, seed, created_at, report_json) "
+                "VALUES(?, ?, ?, ?)", saved,
+            )
+            connection.commit()
+            connection.close()
+
+    def test_missing_database_and_health(self) -> None:
+        """Return a styled database-missing page while health avoids database access."""
+        missing_path = str(Path(self.tempdir.name) / "missing.db")
+        client = create_app(missing_path).test_client()
+        health = client.get("/healthz")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.data, b"ok\n")
+        response = client.get("/")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers.get("Content-Security-Policy"), "default-src 'self'")
+        self.assertIn(b"Database unavailable", response.data)
+        self.assertIn(b"style.css", response.data)
 
     def test_detection_is_idempotent(self) -> None:
         """Re-running detection leaves derived-table counts unchanged."""

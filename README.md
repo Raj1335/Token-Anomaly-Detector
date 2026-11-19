@@ -13,6 +13,16 @@ python -m venv venv
 
 Open `http://127.0.0.1:5000`. Dashboard routes include `/`, `/incidents`, `/incident/<id>`, and `/token/<token_id>`.
 
+## Live demo
+
+Live demo: **[Render demo URL](https://your-render-demo-url.onrender.com)** (replace this placeholder after deployment).
+
+To deploy, create a Render web service from this repository and use the included `render.yaml` settings. The build command installs the requirements and generates, detects, and evaluates the seed-1 synthetic dataset. The service runs through Gunicorn and exposes `/healthz`.
+
+The configured Render commands are `pip install -r requirements.txt && python main.py run-all --seed 1` and `gunicorn wsgi:app --bind 0.0.0.0:$PORT`. On Windows, run the Flask dashboard locally with `python main.py dashboard --db data/events.db`; Gunicorn does not run on Windows.
+
+Render's free tier sleeps when idle, so the first page load after a quiet period can take up to about a minute. The demo has no authentication because it serves only synthetic data. Do not deploy real logs or credentials to this demo.
+
 ## Architecture
 
 ```text
@@ -31,6 +41,7 @@ All detection logic uses timezone-aware UTC datetimes and in-memory dataclasses.
 - Python: 3.14.7
 - Faker: 37.6.0
 - Flask: 3.1.2
+- Gunicorn: 23.0.0 (Render/Linux only)
 
 The brief targets Python 3.11+; Python 3.14.7 is the tested environment.
 

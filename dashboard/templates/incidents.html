@@ -1,9 +1,43 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Incidents</title></head>
-<body><h1>Incidents</h1><table>
-  <tr><th>ID</th><th>Token</th><th>Severity</th><th>Action</th><th>Alerts</th></tr>
-  {% for row in incidents %}<tr><td><a href="/incident/{{ row.incident_id }}">{{ row.incident_id }}</a></td>
-  <td><a href="/token/{{ row.token_id }}">{{ row.token_id }}</a></td><td>{{ row.severity }}</td>
-  <td>{{ row.action }}</td><td>{{ row.alert_count }}</td></tr>{% endfor %}
-</table></body></html>
+{% extends "base.html" %}
+{% block title %}Incidents | Token Anomaly Detector{% endblock %}
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Detection queue</p><h1>Incidents</h1><p class="lede">Correlated token activity requiring review.</p></div>
+</div>
+<div class="filter-row" aria-label="Filter incidents by severity">
+  {% for option in ("ALL", "HIGH", "MEDIUM", "LOW") %}
+    <a class="filter-chip {{ 'filter-active' if severity == option else '' }}"
+       href="{{ url_for('incidents', severity=option) }}"
+       {% if severity == option %}aria-current="page"{% endif %}>{{ option|title }}</a>
+  {% endfor %}
+</div>
+<section class="card table-card">
+  <div class="table-wrap">
+    <table class="data-table incident-table">
+      <caption class="sr-only">Detected token incidents</caption>
+      <thead><tr>
+        <th scope="col">ID</th><th scope="col">Token</th><th scope="col">Severity</th>
+        <th scope="col">Action</th><th scope="col">Detectors</th><th scope="col" class="numeric">Alerts</th>
+        <th scope="col">Start (UTC)</th><th scope="col">Duration</th>
+      </tr></thead>
+      <tbody>
+      {% for item in incidents %}
+        {% set row = item.row %}
+        <tr>
+          <td><a class="mono" href="{{ url_for('incident_detail', incident_id=row.incident_id) }}">#{{ row.incident_id }}</a></td>
+          <td><a class="mono token-link" href="{{ url_for('token_detail', token_id=row.token_id) }}">{{ row.token_id }}</a></td>
+          <td><span class="severity-badge severity-{{ row.severity|lower }}">{{ row.severity }}</span></td>
+          <td><span class="action-tag action-{{ row.action }}">{{ row.action }}</span></td>
+          <td><div class="tag-list">{% for detector in item.detectors %}<span class="detector-tag">{{ detector|replace("_", " ") }}</span>{% endfor %}</div></td>
+          <td class="numeric">{{ row.alert_count|number }}</td>
+          <td class="timestamp">{{ row.start_ts|display_ts }}</td>
+          <td>{{ item.duration }}</td>
+        </tr>
+      {% else %}
+        <tr><td class="table-empty" colspan="8">No incidents match this filter.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

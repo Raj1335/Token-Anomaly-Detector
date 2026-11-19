@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | Token Anomaly Detector{% endblock %}
+{% block content %}
+<section class="card empty-state error-state">
+  <p class="eyebrow">Dashboard</p>
+  <h1>{{ title }}</h1>
+  <p>{{ message }}</p>
+  <a class="button button-secondary" href="{{ url_for('index') }}">Return to overview</a>
+</section>
+{% endblock %}

@@ -1,10 +1,52 @@
-<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Token {{ token_id }}</title></head>
-<body><h1>Token {{ token_id }}</h1>
-  {% if status and status.revoked_at %}<p>Revoked at {{ status.revoked_at }}</p>{% endif %}
-  <h2>Alerts</h2>{% for alert in alerts %}<p>{{ alert.ts }} {{ alert.detector }}: {{ alert.reason }}</p>{% endfor %}
-  <h2>Last 200 events</h2><table><tr><th>ID</th><th>Time</th><th>Principal</th><th>IP</th><th>City</th><th>Object</th><th>Records</th></tr>
-  {% for event in events %}<tr><td>{{ event.event_id }}</td><td>{{ event.ts }}</td><td>{{ event.principal }}</td>
-  <td>{{ event.source_ip }}</td><td>{{ event.geo_city }}</td><td>{{ event.object_type }}</td><td>{{ event.records_returned }}</td></tr>{% endfor %}</table>
-</body></html>
+{% extends "base.html" %}
+{% block title %}{{ token_id }} | Token Anomaly Detector{% endblock %}
+{% block content %}
+<div class="breadcrumb"><a href="{{ url_for('incidents') }}">Incidents</a><span aria-hidden="true">/</span><span>Token</span></div>
+<div class="page-heading token-heading">
+  <div><p class="eyebrow">Token profile</p><h1 class="mono">{{ token_id }}</h1></div>
+  {% if status and status.revoked_at %}<span class="severity-badge severity-high">Revoked</span>{% endif %}
+</div>
+{% if status and status.revoked_at %}
+  <div class="revoked-banner" role="status"><strong>Token revoked</strong><span>Response recorded at {{ status.revoked_at|display_ts }}</span></div>
+{% endif %}
+<section class="card profile-card">
+  <dl class="profile-grid">
+    <div><dt>Token type</dt><dd>{{ profile.token_type if profile else "Unknown" }}</dd></div>
+    <div><dt>Principal</dt><dd>{{ profile.principal if profile else "Unknown" }}</dd></div>
+    <div><dt>Tenant</dt><dd class="mono">{{ profile.tenant_id if profile else "Unknown" }}</dd></div>
+    <div><dt>Home city</dt><dd>{{ home_city or "Unknown" }}</dd></div>
+  </dl>
+</section>
+
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Detection history</p><h2>Alerts</h2></div><span class="meta-label">{{ alerts|length }} shown</span></div>
+  {% for alert in alerts %}
+    <article class="alert-item">
+      <div class="alert-meta"><span class="detector-tag">{{ alert.detector|replace("_", " ") }}</span>
+        <span class="timestamp">{{ alert.ts|display_ts }}</span>
+        <span class="severity-badge severity-{{ 'high' if alert.score >= 0.8 else 'medium' if alert.score >= 0.5 else 'low' }}">Score {{ "%.2f"|format(alert.score) }}</span>
+      </div>
+      <p>{{ alert.reason }}</p>
+    </article>
+  {% else %}
+    <p class="empty-inline">No alerts are recorded for this token.</p>
+  {% endfor %}
+</section>
+
+<section class="card panel">
+  <div class="section-heading"><div><p class="eyebrow">Recent activity</p><h2>Last 200 events</h2></div><span class="meta-label">{{ events|length }} shown</span></div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <caption class="sr-only">Most recent events for token {{ token_id }}</caption>
+      <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Principal</th><th scope="col">Source IP</th><th scope="col">City</th><th scope="col">Object</th><th scope="col">Action</th><th scope="col" class="numeric">Records</th></tr></thead>
+      <tbody>{% for event in events %}
+        <tr><td class="timestamp">{{ event.ts|display_ts }}</td><td>{{ event.principal }}</td>
+          <td class="mono">{{ event.source_ip }}</td><td>{{ event.geo_city }}</td>
+          <td>{{ event.object_type }}</td><td>{{ event.action }}</td><td class="numeric">{{ event.records_returned|number }}</td></tr>
+      {% else %}
+        <tr><td class="table-empty" colspan="7">No events are available for this token.</td></tr>
+      {% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
