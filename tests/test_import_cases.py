@@ -448,10 +448,10 @@ class WebUploadTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 302)
         self.assertFalse(upload_dir.exists())
 
-    def test_upload_endpoint_fails_closed_without_auth_configuration(self) -> None:
-        """Do not enable uploads unless credentials and the signing key are set."""
+    def test_upload_endpoint_fails_closed_on_partial_auth_configuration(self) -> None:
+        """Do not accidentally expose uploads when auth variables are incomplete."""
         with patch.dict(os.environ, {
-            "UPLOAD_USERNAME": "",
+            "UPLOAD_USERNAME": "configured-user",
             "UPLOAD_PASSWORD": "",
             "UPLOAD_SECRET_KEY": "",
         }):
@@ -459,6 +459,35 @@ class WebUploadTests(unittest.TestCase):
             response = client.get("/upload")
         self.assertEqual(response.status_code, 503)
         self.assertIn(b"Log uploads are disabled", response.data)
+
+    def test_public_upload_works_without_render_configuration(self) -> None:
+        """Allow demo uploads without credentials when auth is not configured."""
+        with patch.dict(os.environ, {
+            "UPLOAD_USERNAME": "",
+            "UPLOAD_PASSWORD": "",
+            "UPLOAD_SECRET_KEY": "",
+        }):
+            client = create_app(self.root / "synthetic.db").test_client()
+            form = client.get("/upload")
+            self.assertEqual(form.status_code, 200)
+            self.assertIn(b"sanitized", form.data)
+            response = client.post(
+                "/upload",
+                data={
+                    "log_file": (
+                        io.BytesIO(
+                            b"timestamp,token_id,source_ip\n"
+                            b"2026-01-01T00:00:00Z,public_token,192.0.2.1\n"
+                            b"2026-01-01T01:00:00Z,public_token,192.0.2.1\n"
+                        ),
+                        "demo.csv",
+                    ),
+                },
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Analysis complete", response.data)
+        self.assertIn(b"demo.csv", response.data)
 
     def test_upload_size_limit_returns_a_clear_413(self) -> None:
         """Return a clear error when the configured request cap is exceeded."""

@@ -4,7 +4,7 @@ A CLI and web tool for analyzing token-authenticated API request logs. It profil
 
 ## What it does
 
-- Analyzes user-supplied CSV and JSONL logs through the CLI or an authenticated web upload; detectors make no third-party network requests.
+- Analyzes user-supplied CSV and JSONL logs through the CLI or web upload; detectors make no third-party network requests.
 - Learns detector profiles from an early baseline window and analyzes later events.
 - Produces token-level incidents and simulated response labels; it does not revoke real credentials or contact anyone.
 - Provides a local, read-only Flask dashboard for imported and synthetic databases.
@@ -40,7 +40,7 @@ Events are sorted by timestamp before event IDs are assigned. By default, the ba
 - You must map your log columns to this input schema. There are no built-in Okta, Entra ID, or Salesforce adapters yet.
 - Geographic accuracy depends on your event coordinates or CIDR table.
 - The synthetic dashboard has no authentication; keep it on synthetic data and do not expose imported databases through it.
-- Web uploads require a configured shared username, password, and secret key. Uploaded results are private to that authenticated account; the synthetic dashboard remains public.
+- Web uploads are public by default for a low-friction demo. Do not upload private logs unless optional authentication has been configured.
 - Detector thresholds were tuned on synthetic data only. Results are not evidence of production effectiveness.
 - Low-and-slow behavior that resembles the baseline may evade these rules.
 - The tool only analyzes the fields provided; it does not inspect response payloads for exposed credentials.
@@ -65,22 +65,21 @@ To deploy, create a Render web service from this repository and use the included
 
 The configured Render commands are `pip install -r requirements.txt && python main.py run-all --seed 1` and `gunicorn wsgi:app --bind 0.0.0.0:$PORT`. On Windows, run Flask with `python main.py dashboard --db data\events.db`; Gunicorn does not run on Windows.
 
-### Authenticated web uploads
+### Web uploads on Render
 
-The deployed service serves the synthetic dashboard at `/`. To analyze a user file in the browser, configure these environment variables in the Render service settings:
+The deployed service serves the synthetic dashboard at `/` and the upload page at `/upload`. No extra Render configuration is needed for public demo uploads. **Only upload synthetic or sanitized files** unless you configure optional authentication: anyone can submit a file, and anyone with a result link can view or delete that analysis.
+
+For private uploads, optionally set all three environment variables in Render:
 
 - `UPLOAD_USERNAME`: the upload account name.
 - `UPLOAD_PASSWORD`: a strong password of at least 16 characters.
-- `UPLOAD_SECRET_KEY`: a random secret of at least 32 characters for signed CSRF-protection cookies.
-- `ANALYSIS_DATA_DIR` (optional): a persistent-disk mount path for saved analysis results, if you have configured a Render disk.
+- `UPLOAD_SECRET_KEY`: a random secret of at least 32 characters for signed CSRF-protection cookies. Generate one locally with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 
-Open `https://<your-service>.onrender.com/upload`; the browser will request the configured credentials. The form accepts CSV/JSONL logs, optional column mapping and geo-table CSV, and baseline options. The source upload is removed after analysis; the generated database, report, and CSV exports remain available until deleted. The service limits uploads to 100 MiB and 500,000 rows.
+When all three are configured, upload and result routes require that shared Basic Auth account. If only some are set, uploads fail closed. The form accepts CSV/JSONL logs, optional column mapping and geo-table CSV, and baseline options. Source uploads are removed after analysis; results remain until deleted or storage is cleared. Uploads are limited to 100 MiB and 500,000 rows.
 
-Without `ANALYSIS_DATA_DIR`, generated results are stored in temporary instance storage and may disappear when Render restarts or redeploys the service. Configure it to a mounted persistent disk if results must persist; persistent disks may require a paid Render plan. The upload account is shared, not multi-user: anyone with its credentials can access or delete stored results. Keep credentials private. The existing synthetic dashboard remains public and unauthenticated; never expose it with real imported databases.
+Results are stored in temporary instance storage by default and may disappear after Render restarts or redeploys. An `ANALYSIS_DATA_DIR` pointing to a mounted persistent disk can be used if configured; persistent disks may require a paid Render plan. Keep secrets in Render's environment settings, not in source control.
 
-Keep the default secure-cookie setting on Render HTTPS. For local HTTP-only testing, set `UPLOAD_COOKIE_SECURE=0`; never use that setting on a public deployment. Configure secrets in Render's environment settings, not in source control.
-
-Render's free tier sleeps when idle, so the first page load after a quiet period can take up to about a minute. Do not use the public synthetic demo to upload real logs unless you have configured the authenticated upload settings above and understand the storage behavior.
+Render's free tier sleeps when idle, so the first page load after a quiet period can take up to about a minute.
 
 ## Tested environment
 

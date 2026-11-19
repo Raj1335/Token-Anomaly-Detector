@@ -74,16 +74,21 @@ def create_app(db_path: str | Path) -> Flask:
     """Create the read-only dashboard application for the requested database."""
     app = Flask(__name__)
     app.config["DATABASE"] = str(db_path)
-    app.config["SECRET_KEY"] = os.environ.get("UPLOAD_SECRET_KEY")
+    upload_secret = os.environ.get("UPLOAD_SECRET_KEY", "")
+    upload_username = os.environ.get("UPLOAD_USERNAME", "")
+    upload_password = os.environ.get("UPLOAD_PASSWORD", "")
+    app.config["SECRET_KEY"] = upload_secret or None
     app.secret_key = app.config["SECRET_KEY"]
-    app.config["UPLOAD_USERNAME"] = os.environ.get("UPLOAD_USERNAME", "")
-    app.config["UPLOAD_PASSWORD"] = os.environ.get("UPLOAD_PASSWORD", "")
-    app.config["UPLOADS_ENABLED"] = (
-        bool(app.config["UPLOAD_USERNAME"])
-        and len(app.config["UPLOAD_PASSWORD"]) >= 16
-        and bool(app.config["SECRET_KEY"])
-        and len(app.config["SECRET_KEY"]) >= 32
+    auth_settings_present = bool(upload_username or upload_password or upload_secret)
+    auth_configured = (
+        bool(upload_username)
+        and len(upload_password) >= 16
+        and len(upload_secret) >= 32
     )
+    app.config["UPLOAD_USERNAME"] = upload_username
+    app.config["UPLOAD_PASSWORD"] = upload_password
+    app.config["UPLOADS_ENABLED"] = not auth_settings_present or auth_configured
+    app.config["UPLOAD_AUTH_REQUIRED"] = auth_configured
     app.config["ANALYSIS_DATA_DIR"] = Path(
         os.environ.get(
             "ANALYSIS_DATA_DIR",
@@ -180,10 +185,13 @@ def create_app(db_path: str | Path) -> Flask:
         """Require configured shared credentials for private upload endpoints."""
         if not app.config["UPLOADS_ENABLED"]:
             return Response(
-                "Log uploads are disabled: configure strong upload credentials and a secret key.\n",
+                "Log uploads are disabled: clear partial upload credentials or configure "
+                "a username, a 16+ character password, and a 32+ character secret key.\n",
                 status=503,
                 content_type="text/plain; charset=utf-8",
             )
+        if not app.config["UPLOAD_AUTH_REQUIRED"]:
+            return None
         credentials = request.authorization
         valid = credentials is not None
         if credentials is not None:
@@ -207,6 +215,8 @@ def create_app(db_path: str | Path) -> Flask:
 
     def upload_csrf_token() -> str:
         """Get or create the per-session CSRF token for upload forms."""
+        if not app.config["UPLOAD_AUTH_REQUIRED"]:
+            return ""
         token = session.get("upload_csrf")
         if not isinstance(token, str):
             token = secrets.token_urlsafe(32)
@@ -215,6 +225,8 @@ def create_app(db_path: str | Path) -> Flask:
 
     def csrf_is_valid() -> bool:
         """Validate a state-changing form submission against the session token."""
+        if not app.config["UPLOAD_AUTH_REQUIRED"]:
+            return True
         supplied = request.form.get("csrf_token", "")
         expected = session.get("upload_csrf", "")
         return (

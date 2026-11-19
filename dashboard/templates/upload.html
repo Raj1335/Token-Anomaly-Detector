@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-heading">
   <div>
-    <p class="eyebrow">Private analysis</p>
+    <p class="eyebrow">Web analysis</p>
     <h1>Analyze a log file</h1>
     <p class="lede">Upload one CSV or JSONL file. The analysis uses the same validation, baseline, and detectors as the CLI.</p>
   </div>
@@ -45,6 +45,7 @@
       <input type="checkbox" name="skip_bad_rows">
       <span>Skip invalid rows and include the skipped count</span>
     </label>
+    <p class="upload-note"><strong>Privacy:</strong> this demo upload page may be public. Use only synthetic or sanitized logs unless your site administrator has configured authentication. Anyone with a result link can view or delete that analysis.</p>
     <p class="upload-note">Maximum upload size: 100 MiB. Maximum data rows: 500,000. Uploaded source files are removed after analysis; generated results remain until deleted or the server's temporary storage is cleared.</p>
     <button class="button button-primary" type="submit">Upload and analyze</button>
   </form>
